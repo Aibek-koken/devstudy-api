@@ -11,4 +11,10 @@ public class DevStudyController {
     public String home(){
         return "DevStudy API";
     }
+
+    @GetMapping("/healthz")
+    public String health(){
+        return "ok";
+    }
+    
 }

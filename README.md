@@ -1,5 +1,7 @@
 # DevStudy API
 
+## Overview
+
 A small Spring Boot API created for the INF 345 Fundamentals of DevOps course.
 
 ## Requirements

@@ -22,7 +22,7 @@ public class DevStudyControllerTests {
     void rootEndpointReturnsApiName() throws Exception{
         mockMvc.perform(get("/"))
                 .andExpect(status().isOk())
-                .andExpect(content().string("WRONG VALUE"));
+                .andExpect(content().string("DevStudy API"));
     }
 
     @Test

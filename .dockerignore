@@ -1,0 +1,15 @@
+.git
+.github
+.gitignore
+.idea
+.vscode
+.DS_Store
+*.iml
+target
+.mvn
+mvnw
+mvnw.cmd
+scripts
+.env
+.env.*
+!.env.example

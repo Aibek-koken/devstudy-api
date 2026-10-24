@@ -10,7 +10,9 @@ COPY src ./src
 RUN mvn -B -DskipTests package
 
 # Keep the runtime image smaller by excluding Maven and build tools.
-FROM eclipse-temurin:17-jre
+FROM eclipse-temurin:17-jre-alpine
+
+RUN apk upgrade --no-cache
 
 WORKDIR /app
 

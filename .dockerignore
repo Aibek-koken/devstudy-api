@@ -6,6 +6,8 @@
 .DS_Store
 *.iml
 target
+.cache
+**/.cache
 .mvn
 mvnw
 mvnw.cmd

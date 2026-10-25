@@ -10,14 +10,15 @@ COPY src ./src
 RUN mvn -B -DskipTests package
 
 # Keep the runtime image smaller by excluding Maven and build tools.
-FROM eclipse-temurin:17-jre
+FROM eclipse-temurin:17-jre-alpine
+
+RUN apk upgrade --no-cache
 
 WORKDIR /app
 
 COPY --from=build /workspace/target/*.jar /app/app.jar
 
-ENV PORT=9000
-EXPOSE 9000
+EXPOSE 8080
 
 # Run the application as a non-root user (UID:GID 1000:1000).
 USER 1000:1000

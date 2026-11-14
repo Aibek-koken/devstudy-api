@@ -1,0 +1,8 @@
+# M4 starter: your settings, outside the image. Values are always text: keep the quotes.
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: devstudy-config  # 20. the name blank 8 refers to, e.g. notes-config
+data:
+  PORT: "8080"           # 21. the port your app listens on - the same number as blank 7
+  LOGGING_LEVEL_ROOT: "WARN" # 22. Spring Boot reads this as logging.level.root

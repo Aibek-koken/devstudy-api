@@ -69,6 +69,26 @@ jobs:
           kubectl -n argocd rollout status deployment/argocd-repo-server --timeout=300s
           kubectl -n argocd rollout status deployment/argocd-redis --timeout=300s
 
+          # Argo CD's core install does not create the default AppProject.
+          # Keep the test project limited to this repository and namespace.
+          cat <<'YAML' | kubectl apply -f -
+          apiVersion: argoproj.io/v1alpha1
+          kind: AppProject
+          metadata:
+            name: default
+            namespace: argocd
+          spec:
+            sourceRepos:
+              - https://github.com/Aibek-koken/devstudy-api
+            destinations:
+              - server: https://kubernetes.default.svc
+                namespace: m5
+            clusterResourceWhitelist: []
+            namespaceResourceWhitelist:
+              - group: '*'
+                kind: '*'
+          YAML
+
           sed "s/targetRevision: main/targetRevision: ${branch}/" argocd/application.yaml \
             | kubectl apply -f -
 

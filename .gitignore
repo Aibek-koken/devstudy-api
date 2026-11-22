@@ -32,3 +32,8 @@ build/
 ### VS Code ###
 .vscode/
 .DS_Store
+
+# Keep local application configuration and credentials out of Git.
+.env
+.env.*
+!.env.example

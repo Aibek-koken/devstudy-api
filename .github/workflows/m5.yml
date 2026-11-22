@@ -1,0 +1,57 @@
+# Run the official M5 marker in a throwaway cluster. No persistent cluster credentials.
+name: M5 check
+
+on:
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+defaults:
+  run:
+    shell: bash
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  m5:
+    name: mark_m5.py --kind
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+          fetch-depth: 0
+          # Argo CD must be able to fetch the exact PR commit from GitHub.
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+
+      - name: Install kind and kubectl with checked downloads
+        env:
+          KIND_VERSION: v0.33.0
+          KIND_SHA256: aee6151561422756b764a4ae28e7f44cda5af5a9eead3cc9985112b1de8d8e0d
+          KUBECTL_VERSION: v1.37.1
+          KUBECTL_SHA512: decde4d990d0fbf6451e65524dec42c549de3339f27005c45af8d3c61cca1de852524ebf2215c82be86d4ab2621c823f56f718b8d2c304b9100a903e696c0c32
+        run: |
+          curl -fsSLo kind "https://github.com/kubernetes-sigs/kind/releases/download/${KIND_VERSION}/kind-linux-amd64"
+          echo "${KIND_SHA256}  kind" | sha256sum -c -
+          curl -fsSLO "https://dl.k8s.io/${KUBECTL_VERSION}/kubernetes-client-linux-amd64.tar.gz"
+          echo "${KUBECTL_SHA512}  kubernetes-client-linux-amd64.tar.gz" | sha512sum -c -
+          tar -xzf kubernetes-client-linux-amd64.tar.gz kubernetes/client/bin/kubectl
+          sudo install -m 0755 kind kubernetes/client/bin/kubectl /usr/local/bin/
+
+      - uses: actions/setup-python@v7
+        with:
+          python-version: "3.14"
+      - run: python -m pip install --quiet pyyaml==6.0.3
+
+      - name: Run the official M5 marker, static and live
+        env:
+          MARKER_SHA256: 6b81a9b6906663721eaf0e5e25a1ff9243c84ba0a0809cfda2f6c7bd04451e16
+        run: |
+          curl -fsSLo mark_m5.py https://raw.githubusercontent.com/inf345/inf345-week10-lab/090e437fc490e4887cd8fd1a39bc18bb2fc036fc/mark_m5.py
+          echo "${MARKER_SHA256}  mark_m5.py" | sha256sum -c -
+          python mark_m5.py --path . --kind

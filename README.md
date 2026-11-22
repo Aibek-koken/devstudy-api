@@ -108,6 +108,12 @@ The `M5 check` GitHub Actions workflow runs the same marker with `--kind` on a
 temporary cluster and verifies sync, self-healing, and prune. It does not
 touch the `m4-local` namespace or any persistent cluster.
 
+For an end-to-end rollback test, manually dispatch `M5 rollback check` from
+`main` in GitHub Actions. It creates a temporary Git branch and kind cluster,
+checks the running image before and after a Git image bump, then runs
+`git revert` and checks that Argo CD restores the previous running image.
+The workflow removes its temporary branch when it finishes.
+
 ## Rollback
 
 Argo CD deploys the image declared on `main` in `k8s/deployment.yaml`. If an

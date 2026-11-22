@@ -1,0 +1,113 @@
+# Manual integration test: Git branch -> image bump -> git revert -> Argo CD rollback.
+# Everything runs in a throwaway kind cluster and a temporary Git branch.
+name: M5 rollback check
+
+on:
+  workflow_dispatch:
+
+# This job pushes and removes only the temporary branch it creates below.
+permissions:
+  contents: write
+
+defaults:
+  run:
+    shell: bash
+
+jobs:
+  rollback:
+    name: Verify GitOps rollback
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+          persist-credentials: true
+
+      - name: Install checked kind and kubectl binaries
+        env:
+          KIND_VERSION: v0.33.0
+          KIND_SHA256: aee6151561422756b764a4ae28e7f44cda5af5a9eead3cc9985112b1de8d8e0d
+          KUBECTL_VERSION: v1.37.1
+          KUBECTL_SHA512: decde4d990d0fbf6451e65524dec42c549de3339f27005c45af8d3c61cca1de852524ebf2215c82be86d4ab2621c823f56f718b8d2c304b9100a903e696c0c32
+        run: |
+          curl -fsSLo "$RUNNER_TEMP/kind" "https://github.com/kubernetes-sigs/kind/releases/download/${KIND_VERSION}/kind-linux-amd64"
+          echo "${KIND_SHA256}  ${RUNNER_TEMP}/kind" | sha256sum -c -
+          curl -fsSLo "$RUNNER_TEMP/kubernetes-client-linux-amd64.tar.gz" "https://dl.k8s.io/${KUBECTL_VERSION}/kubernetes-client-linux-amd64.tar.gz"
+          echo "${KUBECTL_SHA512}  ${RUNNER_TEMP}/kubernetes-client-linux-amd64.tar.gz" | sha512sum -c -
+          tar -xzf "$RUNNER_TEMP/kubernetes-client-linux-amd64.tar.gz" -C "$RUNNER_TEMP" kubernetes/client/bin/kubectl
+          sudo install -m 0755 "$RUNNER_TEMP/kind" "$RUNNER_TEMP/kubernetes/client/bin/kubectl" /usr/local/bin/
+
+      - name: Verify image bump and revert on one Argo CD cluster
+        env:
+          ARGOCD_SHA256: 1a87025d8eb2eae621653fd312fb9ca51df1b4b3b6992a030e3a9ef38e45c448
+          OLD_SHA: 0ab9fbc1e942091f883983214098a76b36f7976e
+          NEW_SHA: 212f938fa8a2fded15303dcdf229ff7e758d1e05
+          BASE_COMMIT: 212f938fa8a2fded15303dcdf229ff7e758d1e05
+        run: |
+          set -euo pipefail
+          branch="m5-rollback-${GITHUB_RUN_ID}"
+          trap 'git push origin --delete "$branch" >/dev/null 2>&1 || true' EXIT
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git switch -c "$branch" "$BASE_COMMIT"
+          git push origin "$branch"
+
+          kind create cluster --name m5-rollback --wait 180s \
+            --image kindest/node:v1.36.4@sha256:099e049362a1526b2db71494e1947aae99bd16290d7c895f2b7ea312e3cbfaed
+          kubectl create namespace argocd
+          kubectl create namespace m5
+          kubectl -n m5 create secret generic app-secret \
+            --from-literal="API_KEY=$(openssl rand -hex 16)"
+
+          curl -fsSLo "$RUNNER_TEMP/core-install.yaml" \
+            https://raw.githubusercontent.com/argoproj/argo-cd/v3.5.3/manifests/core-install.yaml
+          echo "${ARGOCD_SHA256}  ${RUNNER_TEMP}/core-install.yaml" | sha256sum -c -
+          kubectl -n argocd apply --server-side --force-conflicts -f "$RUNNER_TEMP/core-install.yaml"
+          kubectl wait --for=condition=Established crd/applications.argoproj.io --timeout=180s
+          kubectl -n argocd rollout status statefulset/argocd-application-controller --timeout=300s
+          kubectl -n argocd rollout status deployment/argocd-repo-server --timeout=300s
+          kubectl -n argocd rollout status deployment/argocd-redis --timeout=300s
+
+          sed "s/targetRevision: main/targetRevision: ${branch}/" argocd/application.yaml \
+            | kubectl apply -f -
+
+          wait_for_image() {
+            local expected_commit="$1" expected_image="$2" stage="$3"
+            local state image ready
+            kubectl -n argocd annotate application devstudy-api \
+              argocd.argoproj.io/refresh=normal --overwrite
+            for attempt in $(seq 1 120); do
+              state=$(kubectl -n argocd get application devstudy-api \
+                -o jsonpath='{.status.sync.status}|{.status.health.status}|{.status.sync.revision}' 2>/dev/null || true)
+              image=$(kubectl -n m5 get deployment devstudy-api \
+                -o jsonpath='{.spec.template.spec.containers[0].image}' 2>/dev/null || true)
+              ready=$(kubectl -n m5 get deployment devstudy-api \
+                -o jsonpath='{.status.readyReplicas}' 2>/dev/null || true)
+              if [[ "$state" == "Synced|Healthy|${expected_commit}" \
+                    && "$image" == "ghcr.io/aibek-koken/devstudy-api:${expected_image}" \
+                    && "$ready" == "2" ]]; then
+                echo "${stage}: Synced/Healthy at ${expected_commit}; Deployment 2/2 on image ${expected_image}"
+                return 0
+              fi
+              sleep 3
+            done
+            echo "${stage} timed out: Application=${state}, image=${image}, ready=${ready}" >&2
+            kubectl -n argocd get application devstudy-api -o yaml | tail -80
+            kubectl -n m5 get deployment,pods -o wide
+            return 1
+          }
+
+          wait_for_image "$(git rev-parse HEAD)" "$OLD_SHA" initial
+          sed -i "s/${OLD_SHA}/${NEW_SHA}/" k8s/deployment.yaml
+          git add k8s/deployment.yaml
+          git commit -m 'Deploy published image for rollback check'
+          bump_commit=$(git rev-parse HEAD)
+          git push origin "$branch"
+          wait_for_image "$bump_commit" "$NEW_SHA" bump
+
+          git revert --no-edit "$bump_commit"
+          revert_commit=$(git rev-parse HEAD)
+          git push origin "$branch"
+          wait_for_image "$revert_commit" "$OLD_SHA" revert
+          echo 'GitOps rollback verified: Git revert restored the previous running image.'
